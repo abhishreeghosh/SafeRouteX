@@ -15,7 +15,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm install
+      - run: npm ci
       - run: npm run typecheck
       - run: npm run build
 
@@ -27,5 +27,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
-      - run: pip install -r backend/requirements.txt
+      - run: pip install -r backend/requirements-ci.txt
       - run: python -m compileall backend/app
+      - run: python -c "from app.main import app; print(app.title)"
+        working-directory: backend
