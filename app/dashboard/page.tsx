@@ -1,4 +1,5 @@
 import { Analytics } from "@/components/analytics";
+import { DashboardHotspots } from "@/components/dashboard-hotspots";
 import { Nav } from "@/components/nav";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -62,6 +63,7 @@ export default function DashboardPage() {
           </Card>
         </div>
       </section>
+      <DashboardHotspots />
       <Analytics />
       <section className="mx-auto grid max-w-7xl gap-4 px-4 pb-16 sm:px-6 md:grid-cols-3 lg:px-8">
         {signalCards.map((card) => (

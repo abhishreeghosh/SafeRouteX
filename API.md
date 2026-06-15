@@ -44,6 +44,32 @@ Returns current alert feed.
 
 Streams alert events to connected clients.
 
+## Community Reports
+
+`GET /reports?status=pending`
+
+Returns community safety reports awaiting or after moderation.
+
+`POST /reports`
+
+```json
+{
+  "category": "theft",
+  "description": "Suspicious activity near the alley",
+  "lat": 28.6139,
+  "lng": 77.209,
+  "district": "Old Market"
+}
+```
+
+`POST /reports/{report_id}/moderate`
+
+```json
+{
+  "action": "approve"
+}
+```
+
 ## AI Assistant
 
 `POST /assistant/ask`

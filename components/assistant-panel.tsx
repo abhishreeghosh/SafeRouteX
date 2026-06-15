@@ -1,27 +1,32 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Mic, Send } from "lucide-react";
+import { Bot, Loader2, Mic, Send } from "lucide-react";
+import { askAssistant } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
-const answers: Record<string, string> = {
-  night: "Old Market is elevated after 21:00. SafeRouteX recommends Guardian Route via Central Grid and avoiding the south alley cluster.",
-  route: "The safest route home scores 91/100, adds 4 minutes, and stays within two monitored corridors.",
-  dangerous: "The highest-risk nearby zones are Old Market, North Pier, and the transfer station perimeter."
+type AssistantPanelProps = {
+  lat?: number;
+  lng?: number;
 };
 
-export function AssistantPanel() {
+export function AssistantPanel({ lat, lng }: AssistantPanelProps) {
   const [prompt, setPrompt] = useState("Is Old Market safe at night?");
-  const [answer, setAnswer] = useState(answers.night);
+  const [answer, setAnswer] = useState("Ask about routes, night safety, or nearby risk zones.");
+  const [loading, setLoading] = useState(false);
 
-  function ask() {
-    const key = prompt.toLowerCase().includes("route")
-      ? "route"
-      : prompt.toLowerCase().includes("danger")
-        ? "dangerous"
-        : "night";
-    setAnswer(answers[key]);
+  async function ask() {
+    if (!prompt.trim()) return;
+    setLoading(true);
+    try {
+      const response = await askAssistant(prompt, lat, lng);
+      setAnswer(`${response.answer} (confidence ${Math.round(response.confidence * 100)}%)`);
+    } catch {
+      setAnswer("SafeRouteX assistant is offline. Start the API with uvicorn to enable live answers.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -45,11 +50,12 @@ export function AssistantPanel() {
         <input
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
+          onKeyDown={(event) => event.key === "Enter" && ask()}
           className="h-11 min-w-0 flex-1 rounded-md border border-white/10 bg-white/10 px-3 text-sm text-white outline-none focus:border-cyber-cyan"
           placeholder="Ask about safety, routes, or nearby risk"
         />
-        <Button onClick={ask} size="icon" aria-label="Ask assistant">
-          <Send className="h-4 w-4" />
+        <Button onClick={ask} size="icon" aria-label="Ask assistant" disabled={loading}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </Button>
       </div>
     </Card>

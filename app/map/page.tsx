@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { AlertTriangle, BellRing, Layers, LocateFixed, Moon, Navigation2, Search, ShieldCheck } from "lucide-react";
 import { AssistantPanel } from "@/components/assistant-panel";
 import { MapboxLiveMap } from "@/components/mapbox-live-map";
@@ -8,12 +9,78 @@ import { Nav } from "@/components/nav";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { alerts, routeOptions } from "@/lib/data";
+import { createAlertSocket, getAlerts, getIncidents, getSafeRoutes, type Alert, type Incident, type RouteOption } from "@/lib/api";
+import { routeOptions as fallbackRoutes } from "@/lib/data";
 
 const categories = ["All", "Theft", "Assault", "Vandalism", "Fraud", "Emergency"];
+const defaultOrigin = { lat: 28.6139, lng: 77.209 };
+const defaultDestination = { lat: 28.6269, lng: 77.2144 };
+
+function formatRoute(route: RouteOption) {
+  return {
+    name: route.name,
+    score: route.score,
+    eta: `${route.eta_minutes} min`,
+    distance: `${route.distance_km} km`,
+    exposure: route.risk_exposure,
+    notes: `${route.risk_exposure} exposure route scored by ${route.name}.`
+  };
+}
 
 export default function MapPage() {
   const [active, setActive] = useState("All");
+  const [search, setSearch] = useState("");
+  const [nightMode, setNightMode] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [routes, setRoutes] = useState(fallbackRoutes);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [location, setLocation] = useState<{ lat: number; lng: number } | undefined>();
+  const [neighborhoodScore, setNeighborhoodScore] = useState(82);
+
+  useEffect(() => {
+    getSafeRoutes(defaultOrigin, defaultDestination, nightMode)
+      .then((response) => setRoutes(response.alternatives.map(formatRoute)))
+      .catch(() => setRoutes(fallbackRoutes));
+
+    getAlerts()
+      .then(setAlerts)
+      .catch(() => undefined);
+
+    let socket: WebSocket | undefined;
+    try {
+      socket = createAlertSocket((alert) => {
+        setAlerts((current) => [alert, ...current.filter((item) => item.id !== alert.id)].slice(0, 6));
+      });
+    } catch {
+      socket = undefined;
+    }
+
+    return () => socket?.close();
+  }, [nightMode]);
+
+  useEffect(() => {
+    getIncidents(active)
+      .then((data) => {
+        setIncidents(data);
+        if (data.length > 0) {
+          const avgSeverity = Math.round(data.reduce((sum, item) => sum + item.severity, 0) / data.length);
+          setNeighborhoodScore(Math.max(0, 100 - avgSeverity));
+        }
+      })
+      .catch(() => undefined);
+  }, [active]);
+
+  function locateUser() {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((position) => {
+      setLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+    });
+  }
+
+  const filteredAlerts = search
+    ? alerts.filter((alert) => `${alert.title} ${alert.area}`.toLowerCase().includes(search.toLowerCase()))
+    : alerts;
 
   return (
     <main className="min-h-screen bg-[#05070d] pt-16">
@@ -22,7 +89,12 @@ export default function MapPage() {
         <aside className="border-r border-white/10 bg-[#07111f]/90 p-4 backdrop-blur-xl">
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-white/40" />
-            <input className="h-11 w-full rounded-md border border-white/10 bg-white/10 pl-10 pr-3 text-sm text-white outline-none focus:border-cyber-cyan" placeholder="Search neighborhood or destination" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-11 w-full rounded-md border border-white/10 bg-white/10 pl-10 pr-3 text-sm text-white outline-none focus:border-cyber-cyan"
+              placeholder="Search neighborhood or destination"
+            />
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             {categories.map((category) => (
@@ -36,12 +108,14 @@ export default function MapPage() {
             ))}
           </div>
           <div className="mt-5 space-y-3">
-            {routeOptions.map((route) => (
+            {routes.map((route) => (
               <Card key={route.name} className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="font-semibold text-white">{route.name}</h2>
-                    <p className="text-xs text-white/50">{route.eta} / {route.distance}</p>
+                    <p className="text-xs text-white/50">
+                      {route.eta} / {route.distance}
+                    </p>
                   </div>
                   <strong className="text-2xl text-white">{route.score}</strong>
                 </div>
@@ -52,42 +126,31 @@ export default function MapPage() {
           </div>
         </aside>
         <section className="relative min-h-[680px] overflow-hidden">
-          <MapboxLiveMap />
+          {showHeatmap ? <MapboxLiveMap incidents={incidents} center={location} nightMode={nightMode} /> : null}
           <div className="map-grid pointer-events-none absolute inset-0 opacity-70 mix-blend-screen" />
           <div className="absolute left-4 top-4 z-10 flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" className="bg-black/40">
+            <Button variant="outline" size="sm" className="bg-black/40" onClick={() => setShowHeatmap((value) => !value)}>
               <Layers className="h-4 w-4" />
-              Heatmap
+              {showHeatmap ? "Heatmap on" : "Heatmap off"}
             </Button>
-            <Button variant="outline" size="sm" className="bg-black/40">
+            <Button variant={nightMode ? "primary" : "outline"} size="sm" className="bg-black/40" onClick={() => setNightMode((value) => !value)}>
               <Moon className="h-4 w-4" />
               Night mode
             </Button>
-            <Button size="sm">
+            <Button size="sm" onClick={locateUser}>
               <LocateFixed className="h-4 w-4" />
               My location
             </Button>
           </div>
-          <svg className="absolute inset-0 h-full w-full" viewBox="0 0 1100 760" fill="none">
-            <path className="route-line" d="M104 628 C 244 548, 306 438, 482 406 C 660 374, 724 226, 996 116" stroke="#45ffb4" strokeWidth="12" strokeLinecap="round" />
-            <path d="M112 672 C 278 604, 374 512, 548 488 C 706 464, 790 326, 1010 224" stroke="#ffd36e" strokeWidth="5" strokeLinecap="round" strokeDasharray="10 18" opacity=".8" />
-            <path d="M88 574 C 238 440, 378 304, 540 286 C 718 266, 788 172, 1034 70" stroke="#ff4f79" strokeWidth="5" strokeLinecap="round" strokeDasharray="8 16" opacity=".7" />
-          </svg>
-          {[
-            ["left-[20%] top-[22%]", "Critical theft cluster", "bg-cyber-red/25 border-cyber-red text-cyber-red"],
-            ["left-[58%] top-[34%]", "Amber crowd density", "bg-cyber-amber/25 border-cyber-amber text-cyber-amber"],
-            ["left-[76%] top-[19%]", "Predicted hotspot", "bg-cyber-red/25 border-cyber-red text-cyber-red"],
-            ["left-[34%] top-[68%]", "Safe corridor", "bg-cyber-mint/20 border-cyber-mint text-cyber-mint"]
-          ].map(([pos, label, cls]) => (
-            <div key={label} className={`absolute ${pos} animate-float rounded-md border px-3 py-2 text-xs font-medium backdrop-blur-xl ${cls}`}>
-              {label}
-            </div>
-          ))}
           <div className="absolute bottom-4 left-4 right-4 grid gap-3 md:grid-cols-3">
-            {["Live crime heat", "Route risk", "Prediction layer"].map((item) => (
-              <div key={item} className="rounded-md border border-white/10 bg-black/50 p-4 backdrop-blur-xl">
-                <p className="text-xs uppercase tracking-[0.18em] text-white/40">{item}</p>
-                <p className="mt-2 text-lg font-semibold text-white">{item === "Route risk" ? "Low" : item === "Prediction layer" ? "Active" : "84%"}</p>
+            {[
+              { label: "Live crime heat", value: `${incidents.length || 4} signals` },
+              { label: "Route risk", value: nightMode ? "Elevated" : "Low" },
+              { label: "Prediction layer", value: "Active" }
+            ].map((item) => (
+              <div key={item.label} className="rounded-md border border-white/10 bg-black/50 p-4 backdrop-blur-xl">
+                <p className="text-xs uppercase tracking-[0.18em] text-white/40">{item.label}</p>
+                <p className="mt-2 text-lg font-semibold text-white">{item.value}</p>
               </div>
             ))}
           </div>
@@ -100,11 +163,11 @@ export default function MapPage() {
               </span>
               <div>
                 <h2 className="font-semibold text-white">Neighborhood score</h2>
-                <p className="text-sm text-white/50">Central Grid</p>
+                <p className="text-sm text-white/50">{active === "All" ? "Central Grid" : active}</p>
               </div>
             </div>
-            <div className="mt-5 text-5xl font-semibold text-white">82</div>
-            <Progress value={82} className="mt-3" />
+            <div className="mt-5 text-5xl font-semibold text-white">{neighborhoodScore}</div>
+            <Progress value={neighborhoodScore} className="mt-3" />
           </Card>
           <Card className="p-4">
             <div className="mb-3 flex items-center gap-2 font-semibold text-white">
@@ -112,24 +175,26 @@ export default function MapPage() {
               Live alerts
             </div>
             <div className="space-y-3">
-              {alerts.map((alert) => (
-                <div key={alert.title} className="rounded-md border border-white/10 bg-white/5 p-3">
+              {filteredAlerts.map((alert) => (
+                <div key={alert.id} className="rounded-md border border-white/10 bg-white/5 p-3">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className={`mt-0.5 h-4 w-4 ${alert.severity === "critical" ? "text-cyber-red" : alert.severity === "medium" ? "text-cyber-amber" : "text-cyber-mint"}`} />
                     <div>
                       <p className="text-sm font-medium text-white">{alert.title}</p>
-                      <p className="text-xs text-white/50">{alert.area} / {alert.ago}</p>
+                      <p className="text-xs text-white/50">{alert.area}</p>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           </Card>
-          <AssistantPanel />
-          <Button variant="danger" size="lg" className="w-full">
-            <Navigation2 className="h-5 w-5" />
-            Start emergency route
-          </Button>
+          <AssistantPanel lat={location?.lat} lng={location?.lng} />
+          <Link href="/emergency">
+            <Button variant="danger" size="lg" className="w-full">
+              <Navigation2 className="h-5 w-5" />
+              Start emergency route
+            </Button>
+          </Link>
         </aside>
       </section>
     </main>

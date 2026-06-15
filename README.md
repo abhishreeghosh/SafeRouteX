@@ -20,13 +20,14 @@ SafeRouteX is a full-scale AI-powered crime intelligence and safe navigation pla
 - Community reporting and moderation-ready admin console
 - Smart AI assistant for safety questions
 - Responsive PWA manifest and app-like interface
+- Frontend wired to FastAPI for routes, alerts, incidents, predictions, assistant, and reports
 
 ## Project Structure
 
 ```text
 app/                 Next.js App Router pages and API routes
 components/          Reusable UI, map previews, analytics, assistant, nav
-lib/                 Shared utilities and demo intelligence data
+lib/                 Shared utilities, API client, and demo intelligence data
 backend/app/         FastAPI routes, services, ML, and database schema
 infra/               Reserved for cloud/IaC expansion
 public/              PWA assets
