@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS user_reports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id TEXT,
   category TEXT NOT NULL,
+  description TEXT,
+  district TEXT,
   media_urls TEXT[] DEFAULT '{}',
   reliability_score NUMERIC(4, 2) DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending',

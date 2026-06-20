@@ -1,70 +1,59 @@
-from datetime import datetime, timezone
-from uuid import uuid4
+﻿from geoalchemy2.functions import ST_AsGeoJSON
+from geoalchemy2.shape import to_shape
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-REPORTS: list[dict] = [
-    {
-        "id": "rep_001",
-        "category": "theft",
-        "description": "Suspicious activity near Old Market alley",
-        "lat": 28.6139,
-        "lng": 77.209,
-        "district": "Old Market",
-        "status": "pending",
-        "reliability_score": 0.0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    },
-    {
-        "id": "rep_002",
-        "category": "assault",
-        "description": "Aggressive crowd reported at North Pier transit exit",
-        "lat": 28.6162,
-        "lng": 77.2248,
-        "district": "North Pier",
-        "status": "pending",
-        "reliability_score": 0.0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    },
-    {
-        "id": "rep_003",
-        "category": "vandalism",
-        "description": "Broken street lighting on Riverside corridor",
-        "lat": 28.6206,
-        "lng": 77.2041,
-        "district": "Riverside",
-        "status": "pending",
-        "reliability_score": 0.0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    },
-]
+from app.models.orm import UserReport
 
 
-def list_reports(status: str | None = None) -> list[dict]:
-    if not status:
-        return REPORTS
-    return [report for report in REPORTS if report["status"] == status]
-
-
-def create_report(payload: dict) -> dict:
-    report = {
-        "id": f"rep_{uuid4().hex[:8]}",
-        "category": payload["category"].lower(),
-        "description": payload["description"],
-        "lat": payload["lat"],
-        "lng": payload["lng"],
-        "district": payload["district"],
-        "status": "pending",
-        "reliability_score": 0.0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+def _serialize(report: UserReport) -> dict:
+    """Convert an ORM row (with a PostGIS geography point) into the plain dict the frontend expects."""
+    point = to_shape(report.location)  # shapely Point, .x = lng, .y = lat
+    return {
+        "id": str(report.id),
+        "category": report.category,
+        "description": report.description,
+        "lat": point.y,
+        "lng": point.x,
+        "district": report.district,
+        "status": report.status,
+        "reliability_score": float(report.reliability_score or 0),
+        "created_at": report.created_at.isoformat() if report.created_at else None,
     }
-    REPORTS.insert(0, report)
-    return report
 
 
-def moderate_report(report_id: str, action: str) -> dict | None:
-    for report in REPORTS:
-        if report["id"] != report_id:
-            continue
-        report["status"] = "approved" if action == "approve" else "rejected"
-        report["reliability_score"] = 0.92 if action == "approve" else 0.18
-        return report
-    return None
+async def list_reports(db: AsyncSession, status: str | None = None) -> list[dict]:
+    stmt = select(UserReport).order_by(UserReport.created_at.desc())
+    if status:
+        stmt = stmt.where(UserReport.status == status)
+    result = await db.execute(stmt)
+    reports = result.scalars().all()
+    return [_serialize(r) for r in reports]
+
+
+async def create_report(db: AsyncSession, payload: dict) -> dict:
+    report = UserReport(
+        category=payload["category"].lower(),
+        description=payload["description"],
+        district=payload["district"],
+        location=f"POINT({payload['lng']} {payload['lat']})",
+        status="pending",
+        reliability_score=0,
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return _serialize(report)
+
+
+async def moderate_report(db: AsyncSession, report_id: str, action: str) -> dict | None:
+    result = await db.execute(select(UserReport).where(UserReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        return None
+
+    report.status = "approved" if action == "approve" else "rejected"
+    report.reliability_score = 0.92 if action == "approve" else 0.18
+    await db.commit()
+    await db.refresh(report)
+    return _serialize(report)
