@@ -1,14 +1,32 @@
-from datetime import datetime, timedelta, timezone
+﻿from datetime import datetime, timedelta, timezone
 
-INCIDENTS = [
-    {"id": "inc_001", "category": "theft", "severity": 82, "lat": 28.6139, "lng": 77.2090, "district": "Old Market"},
-    {"id": "inc_002", "category": "assault", "severity": 91, "lat": 28.6162, "lng": 77.2248, "district": "North Pier"},
-    {"id": "inc_003", "category": "vandalism", "severity": 42, "lat": 28.6201, "lng": 77.2182, "district": "Central Grid"},
-    {"id": "inc_004", "category": "fraud", "severity": 33, "lat": 28.6269, "lng": 77.2144, "district": "Tech Park"},
-]
+from geoalchemy2.shape import to_shape
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.orm import CrimeIncident
 
 
-def list_incidents(category: str | None, hours: int) -> list[dict]:
+def _serialize(incident: CrimeIncident) -> dict:
+    point = to_shape(incident.location)  # shapely Point, .x = lng, .y = lat
+    return {
+        "id": str(incident.id),
+        "category": incident.category,
+        "severity": incident.severity,
+        "description": incident.description,
+        "lat": point.y,
+        "lng": point.x,
+        "district": incident.district,
+        "source": incident.source,
+        "reported_at": incident.occurred_at.isoformat() if incident.occurred_at else None,
+    }
+
+
+async def list_incidents(db: AsyncSession, category: str | None, hours: int) -> list[dict]:
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    records = INCIDENTS if not category else [item for item in INCIDENTS if item["category"] == category.lower()]
-    return [{**item, "reported_at": since.isoformat()} for item in records]
+    stmt = select(CrimeIncident).where(CrimeIncident.occurred_at >= since).order_by(CrimeIncident.occurred_at.desc())
+    if category:
+        stmt = stmt.where(CrimeIncident.category == category.lower())
+    result = await db.execute(stmt)
+    incidents = result.scalars().all()
+    return [_serialize(i) for i in incidents]
